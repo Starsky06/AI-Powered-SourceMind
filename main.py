@@ -24,7 +24,7 @@ import faiss
 import numpy as np
 
 # Define paths
-FAISS_PATH = "faiss_index"  # FAISS index will be stored here
+FAISS_PATH = "faiss_index/faiss.index"  # FAISS index will be stored here (make sure it's a file)
 DATA_PATH = "data"
 
 # Helper function to calculate document hash
@@ -32,7 +32,6 @@ def get_document_hash(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 # Cache data with error handling for web crawling
-# Removed @st.cache_data decorator from async functions
 def crawl_webpage(url):
     try:
         response = requests.get(url)
@@ -46,7 +45,6 @@ def crawl_webpage(url):
         return None
 
 # Ensure directories exist
-os.makedirs(FAISS_PATH, exist_ok=True)
 os.makedirs(DATA_PATH, exist_ok=True)
 
 def save_to_pdf(text, filename):
@@ -63,10 +61,8 @@ def save_to_pdf(text, filename):
         text = text[1000:]  # Remove the text that was already added
     pdf.output(filename)
 
-
 # Initialize FAISS index and Embeddings
 embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"})
-# Initialize FAISS index and Embeddings
 embedding_size = 1024  # Update the embedding size to match the output dimensionality
 
 # FAISS index creation function with persistence
@@ -76,16 +72,11 @@ def create_faiss_index():
             index = faiss.read_index(FAISS_PATH)
         except Exception as e:
             st.error(f"Error reading FAISS index: {e}")
-            # If there's an error, create a new index
-            return faiss.IndexFlatL2(embedding_size)
+            return faiss.IndexFlatL2(embedding_size)  # Create a new index if there's an error
     else:
-        # If the FAISS index does not exist or is a directory, create a new index
         st.warning(f"FAISS index not found at {FAISS_PATH}, creating a new index.")
-        index = faiss.IndexFlatL2(embedding_size)
+        index = faiss.IndexFlatL2(embedding_size)  # Create a new index if not found
     return index
-
-
-
 
 # Add document embeddings to FAISS index
 def add_to_faiss(index, chunks: list[Document]):
@@ -106,10 +97,13 @@ def add_to_faiss(index, chunks: list[Document]):
 
     index.add(embeddings)  # Add to FAISS index
 
+# Save FAISS index to file
 def save_faiss_index(index):
     if os.path.isdir(FAISS_PATH):
         st.error(f"{FAISS_PATH} is a directory, not a file.")
     else:
+        # Create the directory if it does not exist
+        os.makedirs(os.path.dirname(FAISS_PATH), exist_ok=True)
         faiss.write_index(index, FAISS_PATH)  # Save the index correctly to a file
 
 # Extract text from PDF files with error handling
@@ -187,7 +181,7 @@ def add_url_and_pdf_input():
                     st.success(f"Content from PDF {i+1} uploaded successfully!")
 
             # Save the FAISS index after adding documents
-            faiss.write_index(faiss_index, FAISS_PATH)
+            save_faiss_index(faiss_index)
 
 def main():
     st.title('Welcome to SourceMind: Your AI Document Search Assistant')
@@ -209,7 +203,7 @@ def main():
             faiss_index = create_faiss_index()
 
             # Query the FAISS index (assuming the documents were added beforehand)
-            query_embedding = embedding_function.embed(question)
+            query_embedding = embedding_function.embed_documents([question])[0]
             D, I = faiss_index.search(np.array([query_embedding]), k=5)  # k=5 for top 5 results
 
             # Show the top 5 most similar documents
