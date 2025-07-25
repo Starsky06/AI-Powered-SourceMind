@@ -71,11 +71,19 @@ embedding_size = 1024  # Update the embedding size to match the output dimension
 
 # FAISS index creation function with persistence
 def create_faiss_index():
-    if os.path.exists(FAISS_PATH):
-        index = faiss.read_index(FAISS_PATH)
+    if os.path.exists(FAISS_PATH) and os.path.isfile(FAISS_PATH):  # Check if it's a file
+        try:
+            index = faiss.read_index(FAISS_PATH)
+        except Exception as e:
+            st.error(f"Error reading FAISS index: {e}")
+            # If there's an error, create a new index
+            return faiss.IndexFlatL2(embedding_size)
     else:
-        index = faiss.IndexFlatL2(embedding_size)  # Use the updated embedding size
+        # If the FAISS index does not exist or is a directory, create a new index
+        st.warning(f"FAISS index not found at {FAISS_PATH}, creating a new index.")
+        index = faiss.IndexFlatL2(embedding_size)
     return index
+
 
 
 
@@ -98,7 +106,11 @@ def add_to_faiss(index, chunks: list[Document]):
 
     index.add(embeddings)  # Add to FAISS index
 
-
+def save_faiss_index(index):
+    if os.path.isdir(FAISS_PATH):
+        st.error(f"{FAISS_PATH} is a directory, not a file.")
+    else:
+        faiss.write_index(index, FAISS_PATH)  # Save the index correctly to a file
 
 # Extract text from PDF files with error handling
 def extract_text_from_pdf(pdf_path):
