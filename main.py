@@ -57,9 +57,12 @@ def save_to_pdf(text, filename):
 
     # Handle large text by adding text until it overflows
     while text:
-        pdf.multi_cell(0, 10, text[:1000])  # Adjust text length per page
+        # Replace unsupported characters with a placeholder or remove them
+        safe_text = text[:1000].encode('latin-1', 'replace').decode('latin-1')  # Replace non-latin characters
+        pdf.multi_cell(0, 10, safe_text)
         text = text[1000:]  # Remove the text that was already added
     pdf.output(filename)
+
 
 # Initialize FAISS index and Embeddings
 embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"})
