@@ -89,12 +89,14 @@ def add_to_faiss(index, chunks: list[Document]):
     embeddings = []
     ids = []
     for chunk in chunks:
-        chunk_embedding = embedding_function.embed(chunk.page_content)
+        # Update to use embed_documents instead of embed
+        chunk_embedding = embedding_function.embed_documents([chunk.page_content])[0]  # embed_documents returns a list
         embeddings.append(chunk_embedding)
         ids.append(chunk.metadata["id"])
     
     embeddings = np.array(embeddings).astype('float32')  # FAISS requires float32 data type
     index.add(embeddings)
+
 
 # Extract text from PDF files with error handling
 def extract_text_from_pdf(pdf_path):
