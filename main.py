@@ -89,13 +89,18 @@ def add_to_faiss(index, chunks: list[Document]):
     embeddings = []
     ids = []
     for chunk in chunks:
-        # Use embed_documents instead of embed
-        chunk_embedding = embedding_function.embed_documents([chunk.page_content])[0]  # Get the first embedding
+        chunk_embedding = embedding_function.embed_documents([chunk.page_content])[0]
         embeddings.append(chunk_embedding)
         ids.append(chunk.metadata["id"])
     
     embeddings = np.array(embeddings).astype('float32')  # Convert to the correct type for FAISS
+
+    # Debug: Print the shape of embeddings
+    print("Embedding shape:", embeddings.shape)
+
+    # Ensure correct shape for FAISS
     assert embeddings.shape[1] == embedding_size, f"Embedding dimensionality mismatch: {embeddings.shape[1]} != {embedding_size}"
+
     index.add(embeddings)  # Add to FAISS index
 
 
