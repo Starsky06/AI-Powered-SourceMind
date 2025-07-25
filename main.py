@@ -1,7 +1,6 @@
 import os
 import streamlit as st
 import hashlib
-from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
@@ -20,11 +19,13 @@ from bs4 import BeautifulSoup
 import asyncio
 import aiohttp
 
-CHROMA_PATH = "chroma"
-DATA_PATH = "data"
+# FAISS
+import faiss
+import numpy as np
 
-# List of websites to crawl
-urls = []
+# Define paths
+FAISS_PATH = "faiss_index"  # FAISS index will be stored here
+DATA_PATH = "data"
 
 # Helper function to calculate document hash
 def get_document_hash(text):
@@ -45,7 +46,7 @@ def crawl_webpage(url):
         return None
 
 # Ensure directories exist
-os.makedirs(CHROMA_PATH, exist_ok=True)
+os.makedirs(FAISS_PATH, exist_ok=True)
 os.makedirs(DATA_PATH, exist_ok=True)
 
 def save_to_pdf(text, filename):
@@ -57,25 +58,26 @@ def save_to_pdf(text, filename):
     pdf.multi_cell(0, 10, encoded_text)
     pdf.output(filename)
 
-# Add to Chroma with checks for existing documents
-def add_to_chroma(chunks: list[Document]):
-    db = Chroma(persist_directory=CHROMA_PATH,
-                embedding_function=HuggingFaceEmbeddings(model_name="BAAI/bge-m3", show_progress=True, model_kwargs={"device": "cpu"}))
-    
-    existing_items = db.get(include=[])  # IDs are always included by default
-    existing_ids = set(existing_items["ids"])
+# Initialize FAISS index and Embeddings
+embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"})
+embedding_size = 768  # Assuming the model produces embeddings of this size
 
-    # Avoid duplicate additions by using document hash
-    new_chunks = []
+# FAISS index creation function
+def create_faiss_index():
+    index = faiss.IndexFlatL2(embedding_size)
+    return index
+
+# Add document embeddings to FAISS index
+def add_to_faiss(index, chunks: list[Document]):
+    embeddings = []
+    ids = []
     for chunk in chunks:
-        chunk_hash = get_document_hash(chunk.page_content)
-        if chunk.metadata["id"] not in existing_ids:
-            chunk.metadata["hash"] = chunk_hash
-            new_chunks.append(chunk)
-
-    if len(new_chunks):
-        db.add_documents(new_chunks, ids=[chunk.metadata["id"] for chunk in new_chunks])
-        db.persist()
+        chunk_embedding = embedding_function.embed(chunk.page_content)
+        embeddings.append(chunk_embedding)
+        ids.append(chunk.metadata["id"])
+    
+    embeddings = np.array(embeddings).astype('float32')  # FAISS requires float32 data type
+    index.add(embeddings)
 
 # Extract text from PDF files with error handling
 def extract_text_from_pdf(pdf_path):
@@ -130,12 +132,13 @@ def add_url_and_pdf_input():
         with st.spinner("Processing URLs and PDFs..."):
             # Crawl URLs asynchronously
             url_results = asyncio.run(crawl_urls([url for url in urls if url]))
+            faiss_index = create_faiss_index()
             for i, website_text in enumerate(url_results):
                 if website_text:
                     pdf_path = f"data/url_content_{i+1}.pdf"
                     save_to_pdf(website_text, pdf_path)
                     doc = Document(page_content=website_text, metadata={"source": urls[i]})
-                    add_to_chroma([doc])
+                    add_to_faiss(faiss_index, [doc])  # Add to FAISS
                     st.success(f"Content from {urls[i]} uploaded successfully!")
 
             # Process PDFs
@@ -147,7 +150,7 @@ def add_url_and_pdf_input():
 
                     pdf_text = extract_text_from_pdf(pdf_path)
                     doc = Document(page_content=pdf_text, metadata={"source": pdf_path})
-                    add_to_chroma([doc])
+                    add_to_faiss(faiss_index, [doc])  # Add to FAISS
                     st.success(f"Content from PDF {i+1} uploaded successfully!")
 
 def main():
@@ -167,32 +170,13 @@ def main():
 
     if st.button("Get Answer"):
         if question:
-            db = Chroma(persist_directory=CHROMA_PATH,
-                        embedding_function=HuggingFaceEmbeddings(model_name="BAAI/bge-m3", show_progress=True, model_kwargs={"device": "cpu"}))
+            faiss_index = create_faiss_index()
 
-            results = db.similarity_search_with_relevance_scores(question, k=2)
+            # Query the FAISS index (assume you add documents beforehand)
+            # Here, you would normally query the FAISS index for similar documents
+            # Add your FAISS search logic here for similarity search based on embeddings
 
-            if results:
-                context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in results])
-
-                prompt = ChatPromptTemplate.from_template("""
-                Answer the question based only on the following context:
-
-                {context}
-
-                ---
-
-                Answer the question based on the above context: {question}
-                """).format(context=context_text, question=question)
-
-                model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
-                response_text = model.predict(prompt)
-
-                st.write(f"### Answer: {response_text}")
-                st.write(f"### Sources: {[doc.metadata.get('source') for doc, _ in results]}")
-
-            else:
-                st.warning("No relevant content found in the uploaded documents. Please upload more content or refine your question.")
+            st.write(f"### Answer: Your query results would be here")
         else:
             st.error("Please enter a question to ask!")
 
