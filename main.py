@@ -67,11 +67,19 @@ embedding_size = 768  # Assuming the model produces embeddings of this size
 
 # FAISS index creation function with persistence
 def create_faiss_index():
-    if os.path.exists(FAISS_PATH):
-        index = faiss.read_index(FAISS_PATH)
+    if os.path.exists(FAISS_PATH) and os.path.isfile(FAISS_PATH):  # Check if it's a file
+        try:
+            index = faiss.read_index(FAISS_PATH)
+        except Exception as e:
+            st.error(f"Error reading FAISS index: {e}")
+            # If there's an error, we could either create a new index or exit.
+            return faiss.IndexFlatL2(embedding_size)  # Create a new index if there's an issue
     else:
+        # If the FAISS index does not exist or the path is a directory, create a new index
+        st.warning(f"FAISS index not found at {FAISS_PATH}, creating a new index.")
         index = faiss.IndexFlatL2(embedding_size)
     return index
+
 
 # Add document embeddings to FAISS index
 def add_to_faiss(index, chunks: list[Document]):
