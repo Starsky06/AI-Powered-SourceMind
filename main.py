@@ -89,13 +89,15 @@ def add_to_faiss(index, chunks: list[Document]):
     embeddings = []
     ids = []
     for chunk in chunks:
-        # Update to use embed_documents instead of embed
-        chunk_embedding = embedding_function.embed_documents([chunk.page_content])[0]  # embed_documents returns a list
+        # Use embed_documents instead of embed
+        chunk_embedding = embedding_function.embed_documents([chunk.page_content])[0]  # Get the first embedding
         embeddings.append(chunk_embedding)
         ids.append(chunk.metadata["id"])
     
-    embeddings = np.array(embeddings).astype('float32')  # FAISS requires float32 data type
-    index.add(embeddings)
+    embeddings = np.array(embeddings).astype('float32')  # Convert to the correct type for FAISS
+    assert embeddings.shape[1] == embedding_size, f"Embedding dimensionality mismatch: {embeddings.shape[1]} != {embedding_size}"
+    index.add(embeddings)  # Add to FAISS index
+
 
 
 # Extract text from PDF files with error handling
