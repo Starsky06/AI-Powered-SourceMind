@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import hashlib
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
 from transformers import AutoModelForCausalLM
@@ -32,7 +32,7 @@ def get_document_hash(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 # Cache data with error handling for web crawling
-@st.cache_data
+# Removed @st.cache_data decorator from async functions
 def crawl_webpage(url):
     try:
         response = requests.get(url)
@@ -53,18 +53,24 @@ def save_to_pdf(text, filename):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_font("Arial", size=12)
-    encoded_text = text.encode('utf-8', 'replace').decode('latin-1')
     pdf.add_page()
-    pdf.multi_cell(0, 10, encoded_text)
+
+    # Handle large text by adding text until it overflows
+    while text:
+        pdf.multi_cell(0, 10, text[:1000])  # Adjust text length per page
+        text = text[1000:]  # Remove the text that was already added
     pdf.output(filename)
 
 # Initialize FAISS index and Embeddings
 embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-m3", model_kwargs={"device": "cpu"})
 embedding_size = 768  # Assuming the model produces embeddings of this size
 
-# FAISS index creation function
+# FAISS index creation function with persistence
 def create_faiss_index():
-    index = faiss.IndexFlatL2(embedding_size)
+    if os.path.exists(FAISS_PATH):
+        index = faiss.read_index(FAISS_PATH)
+    else:
+        index = faiss.IndexFlatL2(embedding_size)
     return index
 
 # Add document embeddings to FAISS index
@@ -107,7 +113,7 @@ async def fetch_url(url):
 
 async def crawl_urls(urls):
     results = await asyncio.gather(*[fetch_url(url) for url in urls])
-    return results
+    return [result for result in results if result]  # Filter out None values
 
 # Adding URL and PDF input interface
 def add_url_and_pdf_input():
@@ -137,7 +143,7 @@ def add_url_and_pdf_input():
                 if website_text:
                     pdf_path = f"data/url_content_{i+1}.pdf"
                     save_to_pdf(website_text, pdf_path)
-                    doc = Document(page_content=website_text, metadata={"source": urls[i]})
+                    doc = Document(page_content=website_text, metadata={"source": urls[i], "id": get_document_hash(website_text)})
                     add_to_faiss(faiss_index, [doc])  # Add to FAISS
                     st.success(f"Content from {urls[i]} uploaded successfully!")
 
@@ -149,14 +155,17 @@ def add_url_and_pdf_input():
                         f.write(pdf.getbuffer())
 
                     pdf_text = extract_text_from_pdf(pdf_path)
-                    doc = Document(page_content=pdf_text, metadata={"source": pdf_path})
+                    doc = Document(page_content=pdf_text, metadata={"source": pdf_path, "id": get_document_hash(pdf_text)})
                     add_to_faiss(faiss_index, [doc])  # Add to FAISS
                     st.success(f"Content from PDF {i+1} uploaded successfully!")
+
+            # Save the FAISS index after adding documents
+            faiss.write_index(faiss_index, FAISS_PATH)
 
 def main():
     st.title('Welcome to SourceMind: Your AI Document Search Assistant')
 
-    st.markdown("""
+    st.markdown(""" 
     This tool allows you to upload PDF files or provide URLs for content extraction. 
     Once uploaded, you can ask questions about the content, and the AI will provide relevant answers based on the documents you have uploaded.
     """, unsafe_allow_html=True)
@@ -172,11 +181,15 @@ def main():
         if question:
             faiss_index = create_faiss_index()
 
-            # Query the FAISS index (assume you add documents beforehand)
-            # Here, you would normally query the FAISS index for similar documents
-            # Add your FAISS search logic here for similarity search based on embeddings
+            # Query the FAISS index (assuming the documents were added beforehand)
+            query_embedding = embedding_function.embed(question)
+            D, I = faiss_index.search(np.array([query_embedding]), k=5)  # k=5 for top 5 results
 
-            st.write(f"### Answer: Your query results would be here")
+            # Show the top 5 most similar documents
+            st.write(f"### Top 5 Results:")
+            for idx in I[0]:
+                doc = faiss_index.reconstruct(idx)
+                st.write(doc.metadata["source"])  # Display the source of the document
         else:
             st.error("Please enter a question to ask!")
 
